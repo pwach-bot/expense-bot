@@ -10,6 +10,27 @@ const expenseCategories = [
   "อื่นๆ"
 ]
 
+// 🔹 FX convert → USD
+async function convertToUSD(amount, currency) {
+  if (currency === "USD") return amount
+
+  try {
+    const res = await fetch("https://open.er-api.com/v6/latest/USD")
+    const data = await res.json()
+
+    const rate = data.rates[currency]
+
+    if (!rate) return amount
+
+    // rate = USD → currency
+    return amount / rate
+
+  } catch (err) {
+    console.error("FX ERROR:", err)
+    return amount
+  }
+}
+
 // 🔹 append to Google Sheets
 async function appendRow(data) {
   const auth = new google.auth.GoogleAuth({
@@ -18,6 +39,8 @@ async function appendRow(data) {
   })
 
   const sheets = google.sheets({ version: "v4", auth })
+
+  const usd = await convertToUSD(data.amount, data.currency)
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: process.env.SHEET_ID,
@@ -29,7 +52,7 @@ async function appendRow(data) {
         "expense",
         data.amount,
         data.currency,
-        data.amount, // (ยังไม่ convert USD)
+        usd,
         data.category,
         "expense",
         data.note,
@@ -48,7 +71,7 @@ export default async function handler(req, res) {
     const body = req.body
     const event = body.events?.[0]
 
-    // 🔴 FIX สำคัญ (กัน crash)
+    // 🔴 กัน crash
     if (!event || !event.source) {
       return res.status(200).end()
     }
@@ -58,7 +81,7 @@ export default async function handler(req, res) {
     if (event.type === "message" && event.message.type === "text") {
       const userText = event.message.text.trim()
 
-      // 🔹 STEP 1: category selection
+      // 🔹 STEP 1: เลือก category
       if (pending[userId]) {
         const index = parseInt(userText) - 1
 
@@ -68,17 +91,14 @@ export default async function handler(req, res) {
 
           delete pending[userId]
 
-          // 🔹 save to sheet
           await appendRow({
             ...data,
             category
           })
 
-          // 🔹 clean note
           const cleanNote =
             data.note.charAt(0).toUpperCase() + data.note.slice(1)
 
-          // 🔹 currency display
           const displayAmount =
             data.currency === "USD"
               ? `$${data.amount}`
@@ -92,7 +112,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // 🔹 STEP 2: parse text
+      // 🔹 STEP 2: parse input
       function parseText(text) {
         const parts = text.split(" ")
 
@@ -120,10 +140,8 @@ export default async function handler(req, res) {
         return res.status(200).end()
       }
 
-      // 🔹 store pending
       pending[userId] = { note, amount, currency }
 
-      // 🔹 category menu
       let menu = "เลือกหมวด:\n"
       expenseCategories.forEach((c, i) => {
         menu += `${i + 1}. ${c}\n`
