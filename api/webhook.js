@@ -126,7 +126,7 @@ async function getSummary() {
 
   const budget = await getBudget()
 
-  const remaining = budget - expense
+  const remaining = budget - expense // 🔴 income ไม่รวม
 
   const today = now.getDate()
   const totalDays = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
@@ -215,15 +215,16 @@ export default async function handler(req, res) {
 
           const label =
             data.direction === "expense"
-              ? "บันทึกค่าใช้จ่าย"
-              : "บันทึกรายรับ"
+              ? "💸 บันทึกค่าใช้จ่าย"
+              : "💰 บันทึกรายรับ"
 
           const replyText =
-            `${label} ${displayAmount} (${category} - ${cleanNote})\n` +
-            `ใช้ไป $${summary.expense.toFixed(0)} / $${summary.budget}\n` +
-            `เหลือ $${summary.remaining.toFixed(0)}\n` +
-            `เหลือ ${summary.daysLeft} วัน\n` +
-            `ใช้ได้ ~$${summary.perDay.toFixed(0)}/วัน`
+            `${label} ${displayAmount} (${category} - ${cleanNote})\n\n` +
+            `💰 รายรับ: $${summary.income.toFixed(0)}\n` +
+            `💸 ใช้ไป: $${summary.expense.toFixed(0)} / $${summary.budget}\n` +
+            `🟢 เหลือ: $${summary.remaining.toFixed(0)}\n` +
+            `📅 เหลือ ${summary.daysLeft} วัน\n` +
+            `📊 ใช้ได้ ~$${summary.perDay.toFixed(0)}/วัน`
 
           await reply(event.replyToken, replyText)
           return res.status(200).end()
