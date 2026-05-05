@@ -47,7 +47,7 @@ export default async function handler(req, res) {
         return res.status(200).end()
       }
 
-      const replyText = `บันทึก: ${note} ${amount} ${currency}`
+      const replyText = `🔥 NEW CODE: ${note} ${amount} ${currency}`
 
       await reply(event.replyToken, replyText)
     }
