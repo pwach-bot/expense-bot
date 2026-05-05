@@ -126,7 +126,7 @@ async function getSummary() {
 
   const budget = await getBudget()
 
-  const remaining = budget - expense // 🔴 income ไม่รวม
+  const remaining = budget - expense // income ไม่รวม
 
   const today = now.getDate()
   const totalDays = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
@@ -153,6 +153,21 @@ export default async function handler(req, res) {
 
     if (event.type === "message" && event.message.type === "text") {
       const userText = event.message.text.trim()
+
+      // 🔥 COMMAND: สรุป
+      if (userText === "สรุป") {
+        const summary = await getSummary()
+
+        const replyText =
+          `💰 รายรับ: $${summary.income.toFixed(0)}\n` +
+          `💸 ใช้ไป: $${summary.expense.toFixed(0)} / $${summary.budget}\n` +
+          `🟢 เหลือ: $${summary.remaining.toFixed(0)}\n` +
+          `📅 เหลือ ${summary.daysLeft} วัน\n` +
+          `📊 ใช้ได้ ~$${summary.perDay.toFixed(0)}/วัน`
+
+        await reply(event.replyToken, replyText)
+        return res.status(200).end()
+      }
 
       // 🔹 ตั้งงบ
       if (userText.startsWith("ตั้งงบ")) {
