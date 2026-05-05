@@ -1,3 +1,5 @@
+import { google } from "googleapis"
+
 let pending = {}
 
 const expenseCategories = [
@@ -8,6 +10,35 @@ const expenseCategories = [
   "อื่นๆ"
 ]
 
+// 🔹 append to Google Sheets
+async function appendRow(data) {
+  const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+  })
+
+  const sheets = google.sheets({ version: "v4", auth })
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: process.env.SHEET_ID,
+    range: "Transactions!A:I",
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[
+        new Date().toISOString(),
+        "expense",
+        data.amount,
+        data.currency,
+        data.amount, // (ยังไม่ convert USD)
+        data.category,
+        "expense",
+        data.note,
+        new Date().toISOString().slice(0,7)
+      ]]
+    }
+  })
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') {
@@ -15,12 +46,13 @@ export default async function handler(req, res) {
     }
 
     const body = req.body
+    const event = body.events?.[0]
 
-    if (!body || !body.events) {
+    // 🔴 FIX สำคัญ (กัน crash)
+    if (!event || !event.source) {
       return res.status(200).end()
     }
 
-    const event = body.events[0]
     const userId = event.source.userId
 
     if (event.type === "message" && event.message.type === "text") {
@@ -36,11 +68,17 @@ export default async function handler(req, res) {
 
           delete pending[userId]
 
-          // clean note
+          // 🔹 save to sheet
+          await appendRow({
+            ...data,
+            category
+          })
+
+          // 🔹 clean note
           const cleanNote =
             data.note.charAt(0).toUpperCase() + data.note.slice(1)
 
-          // 🔥 FIX currency display
+          // 🔹 currency display
           const displayAmount =
             data.currency === "USD"
               ? `$${data.amount}`
@@ -97,7 +135,7 @@ export default async function handler(req, res) {
     res.status(200).end()
 
   } catch (err) {
-    console.error(err)
+    console.error("ERROR:", err)
     res.status(200).end()
   }
 }
@@ -112,12 +150,7 @@ async function reply(replyToken, text) {
     },
     body: JSON.stringify({
       replyToken,
-      messages: [
-        {
-          type: "text",
-          text
-        }
-      ]
+      messages: [{ type: "text", text }]
     })
   })
 }
