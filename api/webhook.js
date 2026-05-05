@@ -10,7 +10,13 @@ const expenseCategories = [
   "อื่นๆ"
 ]
 
-// 🔹 FX convert → USD
+const incomeCategories = [
+  "เงินเดือน",
+  "โบนัส",
+  "อื่นๆ"
+]
+
+// 🔹 FX convert
 async function convertToUSD(amount, currency) {
   if (currency === "USD") return amount
 
@@ -19,19 +25,16 @@ async function convertToUSD(amount, currency) {
     const data = await res.json()
 
     const rate = data.rates[currency]
-
     if (!rate) return amount
 
-    // rate = USD → currency
     return amount / rate
-
   } catch (err) {
     console.error("FX ERROR:", err)
     return amount
   }
 }
 
-// 🔹 append to Google Sheets
+// 🔹 append to sheet
 async function appendRow(data) {
   const auth = new google.auth.GoogleAuth({
     credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
@@ -49,12 +52,12 @@ async function appendRow(data) {
     requestBody: {
       values: [[
         new Date().toISOString(),
-        "expense",
+        data.direction,
         data.amount,
         data.currency,
         usd,
         data.category,
-        "expense",
+        data.direction,
         data.note,
         new Date().toISOString().slice(0,7)
       ]]
@@ -71,7 +74,6 @@ export default async function handler(req, res) {
     const body = req.body
     const event = body.events?.[0]
 
-    // 🔴 กัน crash
     if (!event || !event.source) {
       return res.status(200).end()
     }
@@ -81,13 +83,19 @@ export default async function handler(req, res) {
     if (event.type === "message" && event.message.type === "text") {
       const userText = event.message.text.trim()
 
-      // 🔹 STEP 1: เลือก category
+      // 🔹 STEP 1: category selection
       if (pending[userId]) {
         const index = parseInt(userText) - 1
 
-        if (index >= 0 && index < expenseCategories.length) {
-          const data = pending[userId]
-          const category = expenseCategories[index]
+        const data = pending[userId]
+
+        const categories =
+          data.direction === "expense"
+            ? expenseCategories
+            : incomeCategories
+
+        if (index >= 0 && index < categories.length) {
+          const category = categories[index]
 
           delete pending[userId]
 
@@ -104,15 +112,20 @@ export default async function handler(req, res) {
               ? `$${data.amount}`
               : `${data.amount} ${data.currency}`
 
+          const label =
+            data.direction === "expense"
+              ? "บันทึกค่าใช้จ่าย"
+              : "บันทึกรายรับ"
+
           const replyText =
-            `บันทึกแล้ว ${displayAmount} (${category} - ${cleanNote})`
+            `${label} ${displayAmount} (${category} - ${cleanNote})`
 
           await reply(event.replyToken, replyText)
           return res.status(200).end()
         }
       }
 
-      // 🔹 STEP 2: parse input
+      // 🔹 STEP 2: parse
       function parseText(text) {
         const parts = text.split(" ")
 
@@ -133,17 +146,31 @@ export default async function handler(req, res) {
         }
       }
 
-      const { note, amount, currency } = parseText(userText)
+      const parsed = parseText(userText)
 
-      if (!amount || isNaN(amount)) {
-        await reply(event.replyToken, "พิมพ์แบบนี้: coffee 5 usd")
+      if (!parsed.amount || isNaN(parsed.amount)) {
+        await reply(event.replyToken, "พิมพ์แบบนี้: coffee -5 หรือ salary 3000")
         return res.status(200).end()
       }
 
-      pending[userId] = { note, amount, currency }
+      const direction = parsed.amount > 0 ? "income" : "expense"
+
+      const absAmount = Math.abs(parsed.amount)
+
+      pending[userId] = {
+        note: parsed.note,
+        amount: absAmount,
+        currency: parsed.currency,
+        direction
+      }
+
+      const categories =
+        direction === "expense"
+          ? expenseCategories
+          : incomeCategories
 
       let menu = "เลือกหมวด:\n"
-      expenseCategories.forEach((c, i) => {
+      categories.forEach((c, i) => {
         menu += `${i + 1}. ${c}\n`
       })
 
