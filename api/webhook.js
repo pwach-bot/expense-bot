@@ -1,3 +1,13 @@
+let pending = {}
+
+const expenseCategories = [
+  "อาหาร",
+  "เดินทาง",
+  "ช้อปปิ้ง",
+  "ค่าใช้จ่ายประจำ",
+  "อื่นๆ"
+]
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') {
@@ -11,22 +21,37 @@ export default async function handler(req, res) {
     }
 
     const event = body.events[0]
+    const userId = event.source.userId
 
     if (event.type === "message" && event.message.type === "text") {
-      const userText = event.message.text
+      const userText = event.message.text.trim()
 
-      // 🔹 parse function
+      // 🔥 STEP 1: ถ้าผู้ใช้กำลังเลือก category
+      if (pending[userId]) {
+        const index = parseInt(userText) - 1
+
+        if (index >= 0 && index < expenseCategories.length) {
+          const data = pending[userId]
+          const category = expenseCategories[index]
+
+          delete pending[userId]
+
+          const replyText = `🔥 NEW CODE: ${data.note} ${data.amount} ${data.currency} (${category})`
+
+          await reply(event.replyToken, replyText)
+          return res.status(200).end()
+        }
+      }
+
+      // 🔥 STEP 2: parse ข้อความ
       function parseText(text) {
-        const parts = text.trim().split(" ")
+        const parts = text.split(" ")
 
         let amount = 0
         let currency = "USD"
 
-        if (parts.length === 1) return { note: text, amount: 0, currency }
-
         const last = parts[parts.length - 1].toLowerCase()
 
-        // detect currency
         if (["usd", "thb", "jpy", "krw", "inr"].includes(last)) {
           currency = last.toUpperCase()
           amount = parseFloat(parts[parts.length - 2])
@@ -41,26 +66,31 @@ export default async function handler(req, res) {
 
       const { note, amount, currency } = parseText(userText)
 
-      // 🔹 basic validation
       if (!amount || isNaN(amount)) {
         await reply(event.replyToken, "กรุณาพิมพ์แบบ: coffee 5 usd")
         return res.status(200).end()
       }
 
-      const replyText = `🔥 NEW CODE: ${note} ${amount} ${currency}`
+      // 🔥 เก็บ pending
+      pending[userId] = { note, amount, currency }
 
-      await reply(event.replyToken, replyText)
+      // 🔥 สร้าง category menu
+      let menu = "เลือกหมวด:\n"
+      expenseCategories.forEach((c, i) => {
+        menu += `${i + 1}. ${c}\n`
+      })
+
+      await reply(event.replyToken, menu)
     }
 
     res.status(200).end()
 
   } catch (err) {
-    console.error("ERROR:", err)
+    console.error(err)
     res.status(200).end()
   }
 }
 
-// 🔹 reply helper
 async function reply(replyToken, text) {
   await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
