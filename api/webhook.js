@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     if (event.type === "message" && event.message.type === "text") {
       const userText = event.message.text.trim()
 
-      // 🔹 STEP 1: handle category selection
+      // 🔹 STEP 1: category selection
       if (pending[userId]) {
         const index = parseInt(userText) - 1
 
@@ -40,7 +40,14 @@ export default async function handler(req, res) {
           const cleanNote =
             data.note.charAt(0).toUpperCase() + data.note.slice(1)
 
-          const replyText = `บันทึกแล้ว $${data.amount} (${category} - ${cleanNote})`
+          // 🔥 FIX currency display
+          const displayAmount =
+            data.currency === "USD"
+              ? `$${data.amount}`
+              : `${data.amount} ${data.currency}`
+
+          const replyText =
+            `บันทึกแล้ว ${displayAmount} (${category} - ${cleanNote})`
 
           await reply(event.replyToken, replyText)
           return res.status(200).end()
@@ -78,7 +85,7 @@ export default async function handler(req, res) {
       // 🔹 store pending
       pending[userId] = { note, amount, currency }
 
-      // 🔹 build category menu
+      // 🔹 category menu
       let menu = "เลือกหมวด:\n"
       expenseCategories.forEach((c, i) => {
         menu += `${i + 1}. ${c}\n`
@@ -95,6 +102,7 @@ export default async function handler(req, res) {
   }
 }
 
+// 🔹 reply helper
 async function reply(replyToken, text) {
   await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
