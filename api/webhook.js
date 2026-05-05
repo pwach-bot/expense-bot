@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     if (event.type === "message" && event.message.type === "text") {
       const userText = event.message.text.trim()
 
-      // 🔥 STEP 1: ถ้าผู้ใช้กำลังเลือก category
+      // 🔹 STEP 1: handle category selection
       if (pending[userId]) {
         const index = parseInt(userText) - 1
 
@@ -36,14 +36,18 @@ export default async function handler(req, res) {
 
           delete pending[userId]
 
-          const replyText = `🔥 NEW CODE: ${data.note} ${data.amount} ${data.currency} (${category})`
+          // clean note
+          const cleanNote =
+            data.note.charAt(0).toUpperCase() + data.note.slice(1)
+
+          const replyText = `บันทึกแล้ว $${data.amount} (${category} - ${cleanNote})`
 
           await reply(event.replyToken, replyText)
           return res.status(200).end()
         }
       }
 
-      // 🔥 STEP 2: parse ข้อความ
+      // 🔹 STEP 2: parse text
       function parseText(text) {
         const parts = text.split(" ")
 
@@ -67,14 +71,14 @@ export default async function handler(req, res) {
       const { note, amount, currency } = parseText(userText)
 
       if (!amount || isNaN(amount)) {
-        await reply(event.replyToken, "กรุณาพิมพ์แบบ: coffee 5 usd")
+        await reply(event.replyToken, "พิมพ์แบบนี้: coffee 5 usd")
         return res.status(200).end()
       }
 
-      // 🔥 เก็บ pending
+      // 🔹 store pending
       pending[userId] = { note, amount, currency }
 
-      // 🔥 สร้าง category menu
+      // 🔹 build category menu
       let menu = "เลือกหมวด:\n"
       expenseCategories.forEach((c, i) => {
         menu += `${i + 1}. ${c}\n`
