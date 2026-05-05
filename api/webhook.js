@@ -34,7 +34,7 @@ async function convertToUSD(amount, currency) {
   }
 }
 
-// 🔹 append to sheet
+// 🔹 append row
 async function appendRow(data) {
   const auth = new google.auth.GoogleAuth({
     credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
@@ -65,14 +65,85 @@ async function appendRow(data) {
   })
 }
 
+// 🔹 get budget
+async function getBudget() {
+  const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+  })
+
+  const sheets = google.sheets({ version: "v4", auth })
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: process.env.SHEET_ID,
+    range: "Budget!A:B"
+  })
+
+  const rows = res.data.values || []
+  const monthKey = new Date().toISOString().slice(0,7)
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === monthKey) {
+      return parseFloat(rows[i][1])
+    }
+  }
+
+  return 10000
+}
+
+// 🔹 summary
+async function getSummary() {
+  const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+  })
+
+  const sheets = google.sheets({ version: "v4", auth })
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: process.env.SHEET_ID,
+    range: "Transactions!A:I"
+  })
+
+  const rows = res.data.values || []
+
+  const now = new Date()
+  const monthKey = now.toISOString().slice(0,7)
+
+  let expense = 0
+  let income = 0
+
+  rows.slice(1).forEach(row => {
+    const type = row[1]
+    const usd = parseFloat(row[4]) || 0
+    const month = row[8]
+
+    if (month === monthKey) {
+      if (type === "expense") expense += usd
+      if (type === "income") income += usd
+    }
+  })
+
+  const budget = await getBudget()
+
+  const remaining = budget - expense
+
+  const today = now.getDate()
+  const totalDays = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
+  const daysLeft = totalDays - today
+
+  const perDay = daysLeft > 0 ? remaining / daysLeft : remaining
+
+  return { expense, income, budget, remaining, daysLeft, perDay }
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') {
       return res.status(200).send('ok')
     }
 
-    const body = req.body
-    const event = body.events?.[0]
+    const event = req.body.events?.[0]
 
     if (!event || !event.source) {
       return res.status(200).end()
@@ -83,10 +154,41 @@ export default async function handler(req, res) {
     if (event.type === "message" && event.message.type === "text") {
       const userText = event.message.text.trim()
 
-      // 🔹 STEP 1: category selection
+      // 🔹 ตั้งงบ
+      if (userText.startsWith("ตั้งงบ")) {
+        const parts = userText.split(" ")
+        const amount = parseFloat(parts[1])
+
+        if (!amount) {
+          await reply(event.replyToken, "ใช้แบบ: ตั้งงบ 20000")
+          return res.status(200).end()
+        }
+
+        const auth = new google.auth.GoogleAuth({
+          credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
+          scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+        })
+
+        const sheets = google.sheets({ version: "v4", auth })
+
+        const monthKey = new Date().toISOString().slice(0,7)
+
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: process.env.SHEET_ID,
+          range: "Budget!A:B",
+          valueInputOption: "USER_ENTERED",
+          requestBody: {
+            values: [[monthKey, amount]]
+          }
+        })
+
+        await reply(event.replyToken, `ตั้งงบเดือนนี้เป็น $${amount} แล้ว`)
+        return res.status(200).end()
+      }
+
+      // 🔹 category step
       if (pending[userId]) {
         const index = parseInt(userText) - 1
-
         const data = pending[userId]
 
         const categories =
@@ -99,10 +201,9 @@ export default async function handler(req, res) {
 
           delete pending[userId]
 
-          await appendRow({
-            ...data,
-            category
-          })
+          await appendRow({ ...data, category })
+
+          const summary = await getSummary()
 
           const cleanNote =
             data.note.charAt(0).toUpperCase() + data.note.slice(1)
@@ -118,14 +219,18 @@ export default async function handler(req, res) {
               : "บันทึกรายรับ"
 
           const replyText =
-            `${label} ${displayAmount} (${category} - ${cleanNote})`
+            `${label} ${displayAmount} (${category} - ${cleanNote})\n` +
+            `ใช้ไป $${summary.expense.toFixed(0)} / $${summary.budget}\n` +
+            `เหลือ $${summary.remaining.toFixed(0)}\n` +
+            `เหลือ ${summary.daysLeft} วัน\n` +
+            `ใช้ได้ ~$${summary.perDay.toFixed(0)}/วัน`
 
           await reply(event.replyToken, replyText)
           return res.status(200).end()
         }
       }
 
-      // 🔹 STEP 2: parse
+      // 🔹 parse
       function parseText(text) {
         const parts = text.split(" ")
 
@@ -134,7 +239,7 @@ export default async function handler(req, res) {
 
         const last = parts[parts.length - 1].toLowerCase()
 
-        if (["usd", "thb", "jpy", "krw", "inr"].includes(last)) {
+        if (["usd","thb","jpy","krw","inr"].includes(last)) {
           currency = last.toUpperCase()
           amount = parseFloat(parts[parts.length - 2])
           const note = parts.slice(0, parts.length - 2).join(" ")
@@ -149,17 +254,15 @@ export default async function handler(req, res) {
       const parsed = parseText(userText)
 
       if (!parsed.amount || isNaN(parsed.amount)) {
-        await reply(event.replyToken, "พิมพ์แบบนี้: coffee -5 หรือ salary 3000")
+        await reply(event.replyToken, "พิมพ์แบบ: coffee -5 หรือ salary 3000")
         return res.status(200).end()
       }
 
       const direction = parsed.amount > 0 ? "income" : "expense"
 
-      const absAmount = Math.abs(parsed.amount)
-
       pending[userId] = {
         note: parsed.note,
-        amount: absAmount,
+        amount: Math.abs(parsed.amount),
         currency: parsed.currency,
         direction
       }
@@ -171,7 +274,7 @@ export default async function handler(req, res) {
 
       let menu = "เลือกหมวด:\n"
       categories.forEach((c, i) => {
-        menu += `${i + 1}. ${c}\n`
+        menu += `${i+1}. ${c}\n`
       })
 
       await reply(event.replyToken, menu)
@@ -180,12 +283,11 @@ export default async function handler(req, res) {
     res.status(200).end()
 
   } catch (err) {
-    console.error("ERROR:", err)
+    console.error(err)
     res.status(200).end()
   }
 }
 
-// 🔹 reply helper
 async function reply(replyToken, text) {
   await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
