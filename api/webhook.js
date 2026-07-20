@@ -5,7 +5,8 @@ let pending = {}
 const expenseCategories = [
   "อาหาร",
   "เดินทาง",
-  "ช้อปปิ้ง",
+  "Grocery",
+  "Shopping",
   "ค่าใช้จ่ายประจำ",
   "อื่นๆ"
 ]
